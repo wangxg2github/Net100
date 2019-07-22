@@ -1,4 +1,4 @@
-#include "EasyTcpClient.hpp"
+ï»¿#include "EasyTcpClient.hpp"
 #include<thread>
 
 bool g_bRun = true;
@@ -11,54 +11,85 @@ void cmdThread()
 		if (0 == strcmp(cmdBuf, "exit"))
 		{
 			g_bRun = false;
-			printf("ÍË³öcmdThreadÏß³Ì\n");
+			printf("é€€å‡ºcmdThreadçº¿ç¨‹\n");
 			break;
 		}
 		else {
-			printf("²»Ö§³ÖµÄÃüÁî¡£\n");
+			printf("ä¸æ”¯æŒçš„å‘½ä»¤ã€‚\n");
 		}
+	}
+}
+
+//å®¢æˆ·ç«¯æ•°é‡
+const int cCount = 4000;
+//å‘é€çº¿ç¨‹æ•°é‡
+const int tCount = 4;
+//å®¢æˆ·ç«¯æ•°ç»„
+EasyTcpClient* client[cCount];
+
+void sendThread(int id)
+{
+	//4ä¸ªçº¿ç¨‹ ID 1~4
+	int c = cCount / tCount;
+	int begin = (id - 1)*c;
+	int end = id * c;
+
+	for (int n = begin; n < end; n++)
+	{
+		client[n] = new EasyTcpClient();
+	}
+	for (int n = begin; n < end; n++)
+	{
+#define CONNECT_WIN
+#ifdef CONNECT_WIN
+		client[n]->Connect("127.0.0.1", 4567);
+#else
+		client[n]->Connect("192.168.154.147", 4567);
+#endif // CONNECT_WIN
+		printf("thread<%d>,Connect=%d\n", id, n);
+	}
+
+	std::chrono::milliseconds t(5000);
+	std::this_thread::sleep_for(t);
+
+	Login login[10];
+	for (int n = 0; n < 10; n++)
+	{
+		strcpy(login[n].userName, "lyd");
+		strcpy(login[n].PassWord, "lydmm");
+	}
+	const int nLen = sizeof(login);
+	while (g_bRun)
+	{
+		for (int n = begin; n < end; n++)
+		{
+			client[n]->SendData(login, nLen);
+			//client[n]->OnRun();
+		}
+	}
+
+	for (int n = begin; n < end; n++)
+	{
+		client[n]->Close();
 	}
 }
 
 int main()
 {
-	const int cCount = FD_SETSIZE - 1;
-	EasyTcpClient* client[cCount];
-
-	for (int n = 0; n < cCount; n++)
-	{
-		client[n] = new EasyTcpClient();
-	}
-	for (int n = 0; n < cCount; n++)
-	{
-		client[n]->Connect("127.0.0.1", 4567);
-	}
-
-	//Æô¶¯UIÏß³Ì
+	//å¯åŠ¨UIçº¿ç¨‹
 	std::thread t1(cmdThread);
 	t1.detach();
 
-	Login login;
-	strcpy(login.userName, "lyd");
-	strcpy(login.PassWord, "lydmm");
+	//å¯åŠ¨å‘é€çº¿ç¨‹
+	for (int n = 0; n < tCount; n++)
+	{
+		std::thread t1(sendThread, n + 1);
+		t1.detach();
+	}
+
 	while (g_bRun)
-	{
-		for (int n = 0; n < cCount; n++)
-		{
-			client[n]->SendData(&login);
-			client[n]->OnRun();
-		}
+		Sleep(100);
 
-		//printf("¿ÕÏĞÊ±¼ä´¦ÀíÆäËüÒµÎñ..\n");
-		//Sleep(1000);
-	}
-
-	for (int n = 0; n < cCount; n++)
-	{
-		client[n]->Close();
-	}
-
-	printf("ÒÑÍË³ö¡£\n");
-	getchar();
+	printf("å·²é€€å‡ºã€‚\n");
 	return 0;
 }

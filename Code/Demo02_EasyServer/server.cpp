@@ -1,4 +1,4 @@
-#include "EasyTcpServer.hpp"
+ï»¿#include "EasyTcpServer.hpp"
 #include<thread>
 
 bool g_bRun = true;
@@ -11,11 +11,11 @@ void cmdThread()
 		if (0 == strcmp(cmdBuf, "exit"))
 		{
 			g_bRun = false;
-			printf("ÍË³öcmdThreadÏß³Ì\n");
+			printf("é€€å‡ºcmdThreadçº¿ç¨‹\n");
 			break;
 		}
 		else {
-			printf("²»Ö§³ÖµÄÃüÁî¡£\n");
+			printf("ä¸æ”¯æŒçš„å‘½ä»¤ã€‚\n");
 		}
 	}
 }
@@ -27,18 +27,19 @@ int main()
 	server.InitSocket();
 	server.Bind(nullptr, 4567);
 	server.Listen(5);
+	server.Start();
 
-	//Æô¶¯UIÏß³Ì
+	//å¯åŠ¨UIçº¿ç¨‹
 	std::thread t1(cmdThread);
 	t1.detach();
 
 	while (g_bRun)
 	{
 		server.OnRun();
-		//printf("¿ÕÏĞÊ±¼ä´¦ÀíÆäËüÒµÎñ..\n");
+		//printf("ç©ºé—²æ—¶é—´å¤„ç†å…¶å®ƒä¸šåŠ¡..\n");
 	}
 	server.Close();
-	printf("ÒÑÍË³ö¡£\n");
+	printf("å·²é€€å‡ºã€‚\n");
 	getchar();
 	return 0;
 }
