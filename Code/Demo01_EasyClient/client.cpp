@@ -40,7 +40,7 @@ void sendThread(int id)
 	}
 	for (int n = begin; n < end; n++)
 	{
-#define CONNECT_WIN
+//#define CONNECT_WIN
 #ifdef CONNECT_WIN
 		client[n]->Connect("127.0.0.1", 4567);
 #else
@@ -71,6 +71,7 @@ void sendThread(int id)
 	for (int n = begin; n < end; n++)
 	{
 		client[n]->Close();
+		delete client[n];
 	}
 }
 
