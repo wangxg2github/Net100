@@ -2,7 +2,7 @@
 #define _EasyTcpServer_hpp_
 
 #ifdef _WIN32
-	#define FD_SETSIZE      10024
+	#define FD_SETSIZE      2506
 	#define WIN32_LEAN_AND_MEAN
 	#define _WINSOCK_DEPRECATED_NO_WARNINGS
 	#include<windows.h>
@@ -18,7 +18,8 @@
 	#define SOCKET_ERROR            (-1)
 #endif
 
-#include<stdio.h>
+#include<cstdio>
+#include <map>
 #include<vector>
 #include<thread>
 #include<mutex>
@@ -96,9 +97,9 @@ private:
 class CCellServer
 {
 public:
-	CCellServer(SOCKET sock)
+	CCellServer(SOCKET listenSock)
 	{
-		_sock = sock;
+		m_ListenSock = listenSock;
 		_pThread = nullptr;
 		_pNetEvent = nullptr;
 	}
@@ -106,7 +107,7 @@ public:
 	~CCellServer()
 	{
 		Close();
-		_sock = INVALID_SOCKET;
+		m_ListenSock = INVALID_SOCKET;
 	}
 
 	void setEventObj(INetEvent* event)
@@ -117,56 +118,58 @@ public:
 	//关闭Socket
 	void Close()
 	{
-		if (_sock != INVALID_SOCKET)
+		if (m_ListenSock != INVALID_SOCKET)
 		{
 #ifdef _WIN32
-			for (int n = (int)_clients.size() - 1; n >= 0; n--)
+			for (int n = (int)m_mapClients.size() - 1; n >= 0; n--)
 			{
-				closesocket(_clients[n]->GetClientSock());
-				delete _clients[n];
+				closesocket(m_mapClients[n]->GetClientSock());
+				delete m_mapClients[n];
 			}
 			// 8 关闭套节字closesocket
-			closesocket(_sock);
+			closesocket(m_ListenSock);
 			//------------
 			//清除Windows socket环境
 			WSACleanup();
 #else
-			for (int n = (int)_clients.size() - 1; n >= 0; n--)
+			for (int n = (int)m_mapClients.size() - 1; n >= 0; n--)
 			{
-				close(_clients[n]->sockfd());
-				delete _clients[n];
+				close(m_mapClients[n]->GetClientSock());
+				delete m_mapClients[n];
 			}
 			// 8 关闭套节字closesocket
-			close(_sock);
+			close(m_ListenSock);
 #endif
-			_clients.clear();
+			m_mapClients.clear();
 		}
 	}
 
 	//是否工作中
 	bool isRun()
 	{
-		return _sock != INVALID_SOCKET;
+		return m_ListenSock != INVALID_SOCKET;
 	}
 
-	//处理网络消息
+
 	bool OnRun()
 	{
+		m_bIsClientNumChange = true;
 		while (isRun())
 		{
 			//从缓冲队列里取出客户数据
-			if (_clientsBuff.size() > 0)
+			if (m_vecClientsBuf.size() > 0)
 			{
-				std::lock_guard<std::mutex> lock(_mutex);
-				for (auto pClient : _clientsBuff)
+				std::lock_guard<std::mutex> lock(m_mutexForClientsBuf);
+				for (auto pClient : m_vecClientsBuf)
 				{
-					_clients.push_back(pClient);
+					m_mapClients[pClient->GetClientSock()] = pClient;
 				}
-				_clientsBuff.clear();
+				m_vecClientsBuf.clear();
+				m_bIsClientNumChange = true;
 			}
 
 			//如果没有需要处理的客户端，就跳过
-			if (_clients.empty())
+			if (m_mapClients.empty())
 			{
 				std::chrono::milliseconds t(1);
 				std::this_thread::sleep_for(t);
@@ -177,45 +180,83 @@ public:
 			fd_set fdRead;//描述符（socket） 集合
 			//清理集合
 			FD_ZERO(&fdRead);
-			//将描述符（socket）加入集合
-			SOCKET maxSock = _clients[0]->GetClientSock();
-			for (int n = (int)_clients.size() - 1; n >= 0; n--)
+			if (m_bIsClientNumChange)
 			{
-				FD_SET(_clients[n]->GetClientSock(), &fdRead);
-				if (maxSock < _clients[n]->GetClientSock())
+				m_bIsClientNumChange = false;
+				//将描述符（socket）加入集合
+				m_maxSock = m_mapClients.begin()->second->GetClientSock();
+				for (auto iter : m_mapClients)
 				{
-					maxSock = _clients[n]->GetClientSock();
+					FD_SET(iter.second->GetClientSock(), &fdRead);
+					if (m_maxSock < iter.second->GetClientSock())
+					{
+						m_maxSock = iter.second->GetClientSock();
+					}
 				}
+				memcpy(&m_fdReadBak, &fdRead, sizeof(fd_set));
 			}
+			else {
+				memcpy(&fdRead, &m_fdReadBak, sizeof(fd_set));
+			}
+
 			///nfds 是一个整数值 是指fd_set集合中所有描述符(socket)的范围，而不是数量
 			///既是所有文件描述符最大值+1 在Windows中这个参数可以写0
-			int ret = select(maxSock + 1, &fdRead, nullptr, nullptr, nullptr);
+			int ret = select((int)m_maxSock + 1, &fdRead, nullptr, nullptr, nullptr);
 			if (ret < 0)
 			{
 				printf("select任务结束。\n");
 				Close();
 				return false;
 			}
-
-			for (int n = (int)_clients.size() - 1; n >= 0; n--)
+			else if (ret == 0)
 			{
-				if (FD_ISSET(_clients[n]->GetClientSock(), &fdRead))
+				continue;
+			}
+			
+#ifdef _WIN32
+			for (unsigned int n = 0; n < fdRead.fd_count; n++)
+			{
+				auto iter  = m_mapClients.find(fdRead.fd_array[n]);
+				if (iter != m_mapClients.end())
 				{
-					if (-1 == RecvData(_clients[n]))
+					if (-1 == RecvData(iter->second))
 					{
-						auto iter = _clients.begin() + n;//std::vector<SOCKET>::iterator
-						if (iter != _clients.end())
-						{
-							if (_pNetEvent)
-								_pNetEvent->OnNetLeave(_clients[n]);
-							delete _clients[n];
-							_clients.erase(iter);
-						}
+						if (_pNetEvent)
+							_pNetEvent->OnNetLeave(iter->second);
+						m_bIsClientNumChange = true;
+						m_mapClients.erase(iter->first);
+					}
+				}else
+				{
+					printf("error. if (iter != _clients.end())\n");
+				}
+
+			}
+#else
+			std::vector<ClientSocket*> temp;
+			for (auto iter : _clients)
+			{
+				if (FD_ISSET(iter.second->sockfd(), &fdRead))
+				{
+					if (-1 == RecvData(iter.second))
+					{
+						if (_pNetEvent)
+							_pNetEvent->OnNetLeave(iter.second);
+						_clients_change = false;
+						temp.push_back(iter.second);
 					}
 				}
 			}
+			for (auto pClient : temp)
+			{
+				_clients.erase(pClient->sockfd());
+				delete pClient;
+			}
+#endif
 		}
+		return true;
 	}
+
 	//缓冲区
 	char _szRecv[RECV_BUFF_SZIE] = {};
 	//接收数据 处理粘包 拆分包
@@ -267,10 +308,9 @@ public:
 
 	void addClient(CClientSocket* pClient)
 	{
-		std::lock_guard<std::mutex> lock(_mutex);
-		//_mutex.lock();
-		_clientsBuff.push_back(pClient);
-		//_mutex.unlock();
+		std::lock_guard<std::mutex> lock(m_mutexForClientsBuf);
+		m_vecClientsBuf.push_back(pClient);
+		return;
 	}
 
 	void Start()
@@ -280,20 +320,25 @@ public:
 
 	size_t getClientCount()
 	{
-		return _clients.size() + _clientsBuff.size();
+		return m_mapClients.size() + m_vecClientsBuf.size();
 	}
+
 private:
-	SOCKET _sock;
-	//正式客户队列
-	std::vector<CClientSocket*> _clients;
-	//缓冲客户队列
-	std::vector<CClientSocket*> _clientsBuff;
-	//缓冲队列的锁
-	std::mutex _mutex;
+	SOCKET m_ListenSock;							//服务端监听Socket
 	std::thread* _pThread;
+
+	std::mutex m_mutexForClientsBuf;				//将缓冲队列中的客户端添加到正式队列，用此锁
+	std::map<SOCKET, CClientSocket*> m_mapClients;	//正式客户队列
+	std::vector<CClientSocket*> m_vecClientsBuf;	//缓冲客户队列
+	
+	fd_set m_fdReadBak;								//备份客户端所有socket
+	bool m_bIsClientNumChange;						//客户列表是否有变化
+	SOCKET m_maxSock;
+	
 	//网络事件对象
 	INetEvent* _pNetEvent;
 };
+
 
 class EasyTcpServer : public INetEvent
 {
@@ -481,7 +526,7 @@ public:
 			///nfds 是一个整数值 是指fd_set集合中所有描述符(socket)的范围，而不是数量
 			///既是所有文件描述符最大值+1 在Windows中这个参数可以写0
 			timeval t = { 0,10};
-			int ret = select(_sock + 1, &fdRead, 0, 0, &t); //
+			int ret = select((int)_sock + 1, &fdRead, 0, 0, &t); //
 			if (ret < 0)
 			{
 				printf("Accept Select任务结束。\n");
@@ -511,7 +556,7 @@ public:
 		auto t1 = _tTime.getElapsedSecond();
 		if (t1 >= 1.0)
 		{
-			printf("thread<%d>,time<%lf>,socket<%d>,clients<%d>,recvCount<%d>\n", _cellServers.size(), t1, _sock,(int)_clientCount, (int)(_recvCount/ t1));
+			printf("thread<%llu>, time<%lf>, socket<%llu>, clients<%d>, recvCount<%d>\n", _cellServers.size(), t1, _sock, (int)_clientCount, (int)(_recvCount/ t1));
 			_recvCount = 0;
 			_tTime.update();
 		}

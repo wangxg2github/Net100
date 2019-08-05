@@ -28,14 +28,14 @@ public:
 	virtual void OnNetJoin(CClientSocket* pClient)
 	{
 		_clientCount++;
-		printf("client<%d> join\n", pClient->GetClientSock());
+		printf("client<%llu> join\n", pClient->GetClientSock());
 	}
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
 	virtual void OnNetLeave(CClientSocket* pClient)
 	{
 		_clientCount--;
-		printf("client<%d> leave\n", pClient->GetClientSock());
+		printf("client<%llu> leave\n", pClient->GetClientSock());
 	}
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
@@ -65,7 +65,7 @@ public:
 		break;
 		default:
 		{
-			printf("<socket=%d>收到未定义消息,数据长度：%d\n", pClient->GetClientSock(), header->dataLength);
+			printf("<socket=%llu>收到未定义消息,数据长度：%d.\n", pClient->GetClientSock(), header->dataLength);
 			//DataHeader ret;
 			//SendData(cSock, &ret);
 		}
