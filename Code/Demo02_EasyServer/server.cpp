@@ -1,24 +1,7 @@
 ﻿#include "EasyTcpServer.hpp"
-#include<thread>
+//#include "MemoryPool/MemoryAlloc.hpp"
 
-bool g_bRun = true;
-void cmdThread()
-{
-	while (true)
-	{
-		char cmdBuf[256] = {};
-		scanf("%s", cmdBuf);
-		if (0 == strcmp(cmdBuf, "exit"))
-		{
-			g_bRun = false;
-			printf("退出cmdThread线程\n");
-			break;
-		}
-		else {
-			printf("不支持的命令。\n");
-		}
-	}
-}
+#include<thread>
 
 class MyServer : public EasyTcpServer
 {
@@ -27,37 +10,38 @@ public:
 	//只会被一个线程触发 安全
 	virtual void OnNetJoin(CClientSocket* pClient)
 	{
-		_clientCount++;
-		printf("client<%llu> join\n", pClient->GetClientSock());
+		m_clientCount++;
+		//printf("client<%llu> join\n", pClient->GetClientSock());
 	}
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
 	virtual void OnNetLeave(CClientSocket* pClient)
 	{
-		_clientCount--;
-		printf("client<%llu> leave\n", pClient->GetClientSock());
+		m_clientCount--;
+		//printf("client<%llu> leave\n", pClient->GetClientSock());
 	}
+
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
 	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header)
 	{
-		_recvCount++;
+		m_recvMsgCount++;
+
 		switch (header->cmd)
 		{
 		case CMD_LOGIN:
 		{
-
 			Login* login = (Login*)header;
-			//printf("收到客户端<Socket=%d>请求：CMD_LOGIN,数据长度：%d,userName=%s PassWord=%s\n", cSock, login->dataLength, login->userName, login->PassWord);
+			//printf("收到客户端请求：CMD_LOGIN,数据长度：%d,userName=%s PassWord=%s\n", login->dataLength, login->userName, login->PassWord);
 			//忽略判断用户密码是否正确的过程
 			LoginResult ret;
-			pClient->SendData(&ret);
+			//pClient->SendData(&ret);
 		}
 		break;
 		case CMD_LOGOUT:
 		{
 			Logout* logout = (Logout*)header;
-			//printf("收到客户端<Socket=%d>请求：CMD_LOGOUT,数据长度：%d,userName=%s \n", cSock, logout->dataLength, logout->userName);
+			//printf("收到客户端请求：CMD_LOGOUT,数据长度：%d,userName=%s \n", logout->dataLength, logout->userName);
 			//忽略判断用户密码是否正确的过程
 			//LogoutResult ret;
 			//SendData(cSock, &ret);
@@ -76,25 +60,36 @@ private:
 
 };
 
+
+MyServer g_EasyTcpServer;
+
+void cmdThread()
+{
+	while (true)
+	{
+		char cmdBuf[256] = {};
+		scanf("%s", cmdBuf);
+		if (0 == strcmp(cmdBuf, "exit"))
+		{
+			g_EasyTcpServer.Stop();
+			printf("退出cmdThread线程\n");
+			break;
+		}
+		else {
+			printf("不支持的命令。\n");
+		}
+	}
+}
+
 int main()
 {
-
-	MyServer server;
-	server.InitSocket();
-	server.Bind(nullptr, 4567);
-	server.Listen(5);
-	server.Start(4);
-
 	//启动UI线程
 	std::thread t1(cmdThread);
 	t1.detach();
 
-	while (g_bRun)
-	{
-		server.OnRun();
-		//printf("空闲时间处理其它业务..\n");
-	}
-	server.Close();
+	g_EasyTcpServer.Start(nullptr, 4567, 4);
+
+
 	printf("已退出。\n");
 	getchar();
 	return 0;
