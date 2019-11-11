@@ -21,6 +21,11 @@ public:
 		//printf("client<%llu> leave\n", pClient->GetClientSock());
 	}
 
+	virtual void OnNetRecv(CClientSocket* pClient)
+	{
+		m_recvCount++;
+	}
+
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
 	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header)
@@ -34,7 +39,7 @@ public:
 			Login* login = (Login*)header;
 			//printf("收到客户端请求：CMD_LOGIN,数据长度：%d,userName=%s PassWord=%s\n", login->dataLength, login->userName, login->PassWord);
 			//忽略判断用户密码是否正确的过程
-			LoginResult ret;
+			//LoginResult ret;
 			//pClient->SendData(&ret);
 		}
 		break;

@@ -90,6 +90,8 @@ public:
 	virtual void OnNetLeave(CClientSocket* pClient) = 0;
 	//客户端消息事件
 	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header) = 0;
+	//Recv事件
+	virtual void OnNetRecv(CClientSocket* pClient) = 0;
 private:
 
 };
@@ -123,11 +125,12 @@ public:
 
 	~CCellServer()
 	{
+		delete _pThread;
 		Close();
 	}
 
 	//响应网络消息
-	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header)
+	void HandleNetMsgAndResponse(CClientSocket* pClient, DataHeader* header)
 	{
 		m_pNetEvent->OnNetMsg(pClient, header);
 	}
@@ -273,7 +276,8 @@ private:
 						m_bIsClientNumChange = true;
 						m_mapClients.erase(iter->first);
 					}
-				}else
+				}
+				else
 				{
 					printf("Find client failure from clientMap! \n");
 				}
@@ -308,18 +312,19 @@ private:
 		服务端接收数据：
 			1、将接收的数据首先存入每个客户端对象中的第二缓冲区
 			2、根据消息长度处理粘包以及拆分包
-			3、当
 	*/
 	int CellServerRecvData(CClientSocket* pClient)
 	{
 		// 5 接收客户端数据
-		int nLen = (int)recv(pClient->GetClientSock(), m_szRecvMsg, RECV_BUFF_SZIE, 0);
-		//printf("nLen=%d\n", nLen);
+		int nLen = (int)recv(pClient->GetClientSock(), m_szRecvMsg, 1, 0);
 		if (nLen <= 0)
 		{
 			printf("客户端<Socket=%u>已退出，任务结束。\n", (unsigned int)pClient->GetClientSock());
-			return -1;
+			return SOCKET_ERROR;
 		}
+		m_pNetEvent->OnNetRecv(pClient);
+
+
 		//将收取到的数据拷贝到消息缓冲区
 		memcpy(pClient->GetMsgBuf() + pClient->GetLastPos(), m_szRecvMsg, nLen);
 		//消息缓冲区的数据尾部位置后移
@@ -336,15 +341,18 @@ private:
 			{
 				//消息缓冲区剩余未处理数据的长度
 				int nSize = pClient->GetLastPos() - header->dataLength;
+				
 				//处理网络消息
-				OnNetMsg(pClient, header);
+				HandleNetMsgAndResponse(pClient, header);
+				
 				//将消息缓冲区剩余未处理数据前移
 				memcpy(pClient->GetMsgBuf(), pClient->GetMsgBuf() + header->dataLength, nSize);
 				//消息缓冲区的数据尾部位置前移
 				pClient->SetLastPos(nSize);
 
 			}
-			else {
+			else 
+			{
 				//消息缓冲区剩余数据不够一条完整消息
 				break;
 			}
@@ -372,12 +380,15 @@ protected:
 	std::atomic_int m_recvMsgCount;
 	//客户端计数
 	std::atomic_int m_clientCount;
+	//服务端Recv调用次数
+	std::atomic_int m_recvCount;
 
 public:
 	EasyTcpServer()
 	{
 		m_listenSocket = INVALID_SOCKET;
 		m_recvMsgCount = 0;
+		m_recvCount = 0;
 		m_clientCount = 0; 
 		m_isStopServer = false;
 	}
@@ -587,6 +598,7 @@ private:
 			m_listenSocket = INVALID_SOCKET;
 		}
 	}
+
 	//处理网络消息
 	void HandleNetConnection()
 	{
@@ -625,7 +637,8 @@ private:
 		auto t1 = m_tTime.getElapsedSecond();
 		if (t1 >= 1.0)
 		{
-			printf("thread<%llu>, time<%lf>, socket<%llu>, clients<%d>, recvCount<%d>\n", m_cellServers.size(), t1, m_listenSocket, (int)m_clientCount, (int)(m_recvMsgCount/ t1));
+			printf("thread<%llu>, time<%lf>, socket<%llu>, clients<%d>, recvCnt<%d>, recvMsgCnt<%d>\n", m_cellServers.size(), t1, m_listenSocket, (int)m_clientCount, (int)(m_recvCount / t1), (int)(m_recvMsgCount/ t1));
+			m_recvCount = 0;
 			m_recvMsgCount = 0;
 			m_tTime.update();
 		}
