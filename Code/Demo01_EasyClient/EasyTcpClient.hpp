@@ -79,7 +79,8 @@ public:
 		{
 			printf("<socket=%d>错误，连接服务器<%s:%d>失败...\n", _sock, ip, port);
 		}
-		else {
+		else 
+		{
 			_isConnect = true;
 			//printf("<socket=%d>连接服务器<%s:%d>成功...\n",_sock, ip, port);
 		}
@@ -230,7 +231,7 @@ public:
 	}
 
 	//发送数据
-	int SendData(DataHeader* header,int nLen)
+	int SendData(DataHeader* header, int nLen)
 	{
 		int ret = SOCKET_ERROR;
 		if (isRun() && header)

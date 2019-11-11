@@ -1,5 +1,7 @@
 ﻿#include "EasyTcpClient.hpp"
-#include<thread>
+#include "CELLTimestamp.hpp"
+#include <thread>
+#include <atomic>
 
 bool g_bRun = true;
 void cmdThread()
@@ -21,17 +23,21 @@ void cmdThread()
 }
 
 //客户端数量
-const int cCount = 4000;
+const int cCount = 40;
 //发送线程数量
 const int tCount = 4;
 //客户端数组
 EasyTcpClient* client[cCount];
 
+//客户端Send次数
+std::atomic_int g_sendCount;
+std::atomic_int g_readyCount;
+
 void sendThread(int id)
 {
 	//4个线程 ID 1~4
 	int c = cCount / tCount;
-	int begin = (id - 1)*c;
+	int begin = (id - 1) * c;
 	int end = id * c;
 
 	for (int n = begin; n < end; n++)
@@ -40,7 +46,7 @@ void sendThread(int id)
 	}
 	for (int n = begin; n < end; n++)
 	{
-//#define CONNECT_WIN
+#define CONNECT_WIN
 #ifdef CONNECT_WIN
 		client[n]->Connect("127.0.0.1", 4567);
 #else
@@ -49,11 +55,17 @@ void sendThread(int id)
 		printf("thread<%d>,Connect=%d\n", id, n);
 	}
 
-	std::chrono::milliseconds t(5000);
-	std::this_thread::sleep_for(t);
+	//使用readyCount等待所有线程链接完成
+	g_readyCount++;
+	while (g_readyCount < tCount)
+	{
+		std::chrono::milliseconds t(10);
+		std::this_thread::sleep_for(t);
+	}
 
-	Login login[10];
-	for (int n = 0; n < 10; n++)
+#define CLIENTSENDPKTCOUNT 1
+	Login login[CLIENTSENDPKTCOUNT];
+	for (int n = 0; n < CLIENTSENDPKTCOUNT; n++)
 	{
 		strcpy(login[n].userName, "lyd");
 		strcpy(login[n].PassWord, "lydmm");
@@ -63,7 +75,10 @@ void sendThread(int id)
 	{
 		for (int n = begin; n < end; n++)
 		{
-			client[n]->SendData(login, nLen);
+			if (SOCKET_ERROR != client[n]->SendData(login, nLen))
+				g_sendCount++;
+
+			//客户端接收数据
 			//client[n]->OnRun();
 		}
 	}
@@ -88,8 +103,18 @@ int main()
 		t1.detach();
 	}
 
+	CELLTimestamp tTime;
 	while (g_bRun)
-		Sleep(100);
+	{
+		auto t = tTime.getElapsedSecond();
+		if (t > 1.0)
+		{
+			printf("thread<%d>, client<%d>, time<%lf>, sendCnt<%d>\n", tCount, cCount, t, (int)(g_sendCount / t));
+			g_sendCount = 0;
+			tTime.update();
+		}
+	}
+	Sleep(100);
 
 	printf("已退出。\n");
 	return 0;
