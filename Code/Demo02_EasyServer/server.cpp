@@ -28,7 +28,7 @@ public:
 
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
-	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header)
+	virtual void OnNetMsg(CCellServer* pServer, CClientSocket* pClient, DataHeader* header)
 	{
 		m_recvMsgCount++;
 
@@ -41,6 +41,8 @@ public:
 			//忽略判断用户密码是否正确的过程
 			//LoginResult ret;
 			//pClient->SendData(&ret);
+
+			pServer->AddSendTask(pClient, header);
 		}
 		break;
 		case CMD_LOGOUT:
@@ -95,7 +97,7 @@ int main()
 	g_EasyTcpServer.Start(nullptr, 4567, 4);
 
 
-	printf("已退出。\n");
+	printf("exit.\n");
 	getchar();
 	return 0;
 }

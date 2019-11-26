@@ -27,6 +27,7 @@
 
 #include"MessageHeader.hpp"
 #include"CELLTimestamp.hpp"
+#include "HandlingNetMsg.hpp"
 
 //缓冲区最小单元大小
 #ifndef RECV_BUFF_SZIE
@@ -79,6 +80,8 @@ private:
 	unsigned int	m_lastPos;						//消息缓冲区的数据尾部位置
 };
 
+
+class CCellServer;
 //网络事件接口
 class INetEvent
 {
@@ -89,12 +92,36 @@ public:
 	//客户端离开事件
 	virtual void OnNetLeave(CClientSocket* pClient) = 0;
 	//客户端消息事件
-	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header) = 0;
+	virtual void OnNetMsg(CCellServer* pServer, CClientSocket* pClient, DataHeader* header) = 0;
 	//Recv事件
 	virtual void OnNetRecv(CClientSocket* pClient) = 0;
 private:
 
 };
+
+
+/*
+	网络消息发送任务
+	*/
+class CCellSendTask :public CCellTask
+{
+	CClientSocket* m_pClient;
+	DataHeader* m_pDataHeader;
+public:
+	CCellSendTask(CClientSocket* pClient, DataHeader* header)
+	{
+		m_pClient = pClient;
+		m_pDataHeader = header;
+	}
+
+	//执行任务
+	void doTask()
+	{
+		m_pClient->SendData(m_pDataHeader);
+		delete m_pDataHeader;
+	}
+};
+
 
 class CCellServer
 {
@@ -110,10 +137,9 @@ private:
 	bool m_bIsClientNumChange;						//客户列表是否有变化
 	SOCKET m_maxSock;
 
-	char m_szRecvMsg[RECV_BUFF_SZIE] = {};			//recv接收数据缓冲区，然后存入每个客户端对象中的第二缓冲区
-
 	INetEvent* m_pNetEvent;							//网络事件对象
 
+	CCellTaskServer m_TaskServer;					//发送消息线程对象
 public:
 	CCellServer(SOCKET listenSock)
 	{
@@ -132,7 +158,7 @@ public:
 	//响应网络消息
 	void HandleNetMsgAndResponse(CClientSocket* pClient, DataHeader* header)
 	{
-		m_pNetEvent->OnNetMsg(pClient, header);
+		m_pNetEvent->OnNetMsg(this, pClient, header);
 	}
 
 	void addClient(CClientSocket* pClient)
@@ -145,6 +171,9 @@ public:
 	void Start()
 	{
 		_pThread = new std::thread(std::mem_fun(&CCellServer::HandleNetData), this);
+		_pThread->detach();
+
+		m_TaskServer.Start();
 	}
 
 	size_t getClientCount()
@@ -155,6 +184,13 @@ public:
 	void setEventObj(INetEvent* event)
 	{
 		m_pNetEvent = event;
+	}
+
+	void AddSendTask(CClientSocket* pClient, DataHeader* header)
+	{
+		CCellSendTask *pTask = new CCellSendTask(pClient, header);
+		m_TaskServer.AddTask(pTask);
+		return;
 	}
 
 private:
@@ -315,8 +351,17 @@ private:
 	*/
 	int CellServerRecvData(CClientSocket* pClient)
 	{
+		if (pClient == nullptr)
+		{
+			printf("pClient is nullptr!\n");
+			return -1;
+		}
+
 		// 5 接收客户端数据
-		int nLen = (int)recv(pClient->GetClientSock(), m_szRecvMsg, 1, 0);
+		int nLen = (int)recv(pClient->GetClientSock(), 
+							pClient->GetMsgBuf() + pClient->GetLastPos(), 
+							(RECV_BUFF_SZIE * 5 - pClient->GetLastPos()), 
+							0);
 		if (nLen <= 0)
 		{
 			printf("客户端<Socket=%u>已退出，任务结束。\n", (unsigned int)pClient->GetClientSock());
@@ -324,11 +369,7 @@ private:
 		}
 		m_pNetEvent->OnNetRecv(pClient);
 
-
-		//将收取到的数据拷贝到消息缓冲区
-		memcpy(pClient->GetMsgBuf() + pClient->GetLastPos(), m_szRecvMsg, nLen);
 		//消息缓冲区的数据尾部位置后移
-
 		pClient->SetLastPos(pClient->GetLastPos() + nLen);
 
 		//判断消息缓冲区的数据长度大于消息头DataHeader长度
@@ -456,9 +497,14 @@ public:
 		m_clientCount--;
 	}
 
+	virtual void OnNetRecv(CClientSocket* pClient)
+	{
+		m_recvCount++;
+	}
+
 	//cellServer 4 多个线程触发 不安全
 	//如果只开启1个cellServer就是安全的
-	virtual void OnNetMsg(CClientSocket* pClient, DataHeader* header)
+	virtual void OnNetMsg(CCellServer* pServer, CClientSocket* pClient, DataHeader* header)
 	{
 		m_recvMsgCount++;
 	}
